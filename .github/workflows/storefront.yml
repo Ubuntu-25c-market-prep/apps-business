@@ -1,0 +1,69 @@
+###############################################################################
+# storefront: build and test on every change.
+#
+# This workflow BUILDS BOTH ARCHITECTURES AND PUSHES NOTHING. That is
+# deliberate: pushing needs an ECR repository, an OIDC role with
+# ecr:PutImage, and a decision about how tags are derived - all of which are
+# apps-business#2, not this ticket. Wiring a half-considered push in here now
+# would be the harder thing to unpick later.
+#
+# What it does buy today: an amd64-only regression cannot merge. Nodes are
+# Graviton by intent, and an image that silently stopped building for arm64
+# would not be discovered until a pod failed to schedule, which is a long way
+# from the commit that caused it.
+#
+# The build runs `go vet` and `go test` inside the builder stage (see the
+# Dockerfile), so there is no separate test job here - one definition of "does
+# it build and pass", used identically by CI and by anyone running docker
+# build locally.
+###############################################################################
+
+name: storefront
+
+on:
+  pull_request:
+    paths:
+      - "storefront/**"
+      - ".github/workflows/storefront.yml"
+  push:
+    branches: [main]
+    paths:
+      - "storefront/**"
+      - ".github/workflows/storefront.yml"
+
+# No id-token, no AWS. This workflow has no credentials at all, which is the
+# right posture for something that only needs to compile code from a pull
+# request - including a pull request from a fork.
+permissions:
+  contents: read
+
+concurrency:
+  group: storefront-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: build (amd64 + arm64)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # No QEMU on purpose. The Dockerfile pins its builder stage to
+      # $BUILDPLATFORM and cross-compiles with GOARCH, so the arm64 image is
+      # produced by an amd64 runner without emulation. Adding setup-qemu-action
+      # here would make an emulated fallback silently available, and a future
+      # Dockerfile change that broke cross-compilation would then pass CI while
+      # taking eight times as long.
+      - name: Build both architectures
+        uses: docker/build-push-action@v6
+        with:
+          context: ./storefront
+          platforms: linux/amd64,linux/arm64
+          push: false
+          build-args: |
+            VERSION=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
