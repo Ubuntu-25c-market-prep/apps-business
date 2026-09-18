@@ -1,0 +1,260 @@
+/*
+ * One stylesheet, no external requests.
+ *
+ * No @import, no CDN, no web font. Everything this page needs is in the
+ * image, which means: it renders identically with no egress, it cannot leak a
+ * visit to a third party, and it does not need a CSP exception. The font stack
+ * below resolves to whatever the reader's OS already has.
+ *
+ * Mobile-first: the base rules are the narrow layout, and the one media query
+ * widens it. Print rules are at the bottom, because a resume gets printed and
+ * a screen stylesheet that wastes a page on dark backgrounds is a real cost.
+ */
+
+:root {
+  --ink: #1a1a1a;
+  --ink-soft: #4a4a4a;
+  --rule: #d8d8d8;
+  --accent: #23508f;
+  --page: #ffffff;
+  --measure: 42rem; /* comfortable line length, not the full window */
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  padding: 1.5rem 1rem 3rem;
+  background: var(--page);
+  color: var(--ink);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 1rem;
+  line-height: 1.55;
+}
+
+/* One column, centred, capped at a readable measure. */
+body > header,
+body > main,
+body > footer {
+  max-width: var(--measure);
+  margin-inline: auto;
+}
+
+/* ---------------------------------------------------------------- header */
+
+header {
+  border-bottom: 2px solid var(--accent);
+  padding-bottom: 1rem;
+  margin-bottom: 1.75rem;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.9rem;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+
+.headline {
+  margin: 0.35rem 0 0.9rem;
+  color: var(--ink-soft);
+  font-size: 1.05rem;
+}
+
+address {
+  font-style: normal; /* the element is semantic; the italics are not wanted */
+}
+
+.contact {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  font-size: 0.92rem;
+  color: var(--ink-soft);
+}
+
+a {
+  color: var(--accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+a:hover,
+a:focus {
+  text-decoration-thickness: 2px;
+}
+
+/* ------------------------------------------------------------- sections */
+
+section {
+  margin-bottom: 1.75rem;
+}
+
+h2 {
+  margin: 0 0 0.75rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: var(--accent);
+  border-bottom: 1px solid var(--rule);
+  padding-bottom: 0.3rem;
+}
+
+article {
+  margin-bottom: 1.25rem;
+}
+
+article:last-child {
+  margin-bottom: 0;
+}
+
+h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+/* Org / location / dates. Stacks on a phone, one line on a wide screen. */
+.meta {
+  margin: 0.15rem 0 0.5rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.75rem;
+  font-size: 0.9rem;
+  color: var(--ink-soft);
+}
+
+.org {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+ul {
+  margin: 0;
+  padding-left: 1.15rem;
+}
+
+li + li {
+  margin-top: 0.25rem;
+}
+
+p {
+  margin: 0 0 0.6rem;
+}
+
+/* ---------------------------------------------------------------- skills */
+
+.skills {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.15rem 1rem;
+}
+
+.skills dt {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.skills dd {
+  margin: 0 0 0.6rem;
+  color: var(--ink-soft);
+}
+
+/* ---------------------------------------------------------------- footer */
+
+footer {
+  margin-top: 2.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--rule);
+  font-size: 0.85rem;
+  color: var(--ink-soft);
+}
+
+/* ------------------------------------------------------- wider viewports */
+
+@media (min-width: 40rem) {
+  body {
+    padding: 3rem 2rem 4rem;
+  }
+
+  h1 {
+    font-size: 2.4rem;
+  }
+
+  /* Label column for skills, once there is room for one. */
+  .skills {
+    grid-template-columns: 9rem 1fr;
+  }
+
+  .skills dd {
+    margin-bottom: 0.35rem;
+  }
+}
+
+/* ------------------------------------------------------------------ print
+ *
+ * Printed to A4/Letter this should be one or two pages of black on white.
+ * Link URLs are printed after the link text, because a paper copy of a
+ * hyperlink is otherwise a dead end.
+ */
+
+@media print {
+  :root {
+    --ink: #000;
+    --ink-soft: #333;
+    --accent: #000;
+    --rule: #999;
+  }
+
+  body {
+    padding: 0;
+    font-size: 10.5pt;
+    line-height: 1.4;
+  }
+
+  body > header,
+  body > main,
+  body > footer {
+    max-width: none;
+  }
+
+  a {
+    color: #000;
+    text-decoration: none;
+  }
+
+  /* Show the destination of real links only - not mailto:/tel:, where the
+     visible text already is the address. */
+  a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 0.85em;
+    color: var(--ink-soft);
+    word-break: break-all;
+  }
+
+  /* Never split an entry across a page break. */
+  article,
+  .skills {
+    break-inside: avoid;
+  }
+
+  h2 {
+    break-after: avoid;
+  }
+
+  footer {
+    display: none;
+  }
+}

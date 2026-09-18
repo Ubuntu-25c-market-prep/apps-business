@@ -14,21 +14,34 @@ configuration, not secrets.
 <app>/
 ├── src/
 ├── Dockerfile
-├── chart/                Helm chart for this app
-├── .github/workflows/    build, test, push to ECR
-└── README.md             what it does, its dependencies, its SLO
+└── README.md             what it does, how to edit it, how it is built
+
+.github/workflows/
+├── build-push.yml        reusable: build, and push to ECR on main
+└── <app>.yml             per-app trigger, path-filtered, calls build-push
 ```
+
+Deployment manifests are **not** here. They live in `gitops-argocd` under
+`apps/<app>/overlays/<env>/`, and an Argo CD Application appears when
+`apps/*/overlays/dev/kustomization.yaml` exists - that file is the whole
+registration step.
 
 The build pipeline pushes an immutable image tag to ECR. A separate pull request
 in `gitops-argocd` moves that tag through dev → stage → prod. Build and deploy
 are deliberately not the same action.
+
+## Applications
+
+| App | What it is | Image |
+|---|---|---|
+| `resume-builder` | Static resume site, nginx, no build step | `dev-ecr-us-east-1/resume-builder` |
 
 ## The golden path
 
 A new service should not require its author to learn the platform. Scaffolding
 from the Backstage template gets you:
 
-- A multi-arch build (`linux/amd64` + `linux/arm64`)
+- A build for the architecture the cluster actually runs (see below)
 - OpenTelemetry auto-instrumentation wired to the collector
 - Prometheus metrics on `/metrics` with the required labels
 - Resource requests and limits set, because Kyverno rejects workloads without them
@@ -38,11 +51,26 @@ from the Backstage template gets you:
 If you are writing any of that by hand, the golden path has a gap — raise it
 against `@devex` rather than working around it.
 
+**Where it stands today**, stated plainly so nobody plans against it: there is
+no Backstage template, no OpenTelemetry collector and no Prometheus scrape
+config on `dev-eks-us-east-1` yet. `resume-builder` is a static site and emits
+neither traces nor metrics. The rows in the table below that are enforced
+**are** enforced; the rest of this section is the destination, not the state.
+
+### Architecture, corrected
+
+This README previously said nodes are Graviton and that an amd64-only image
+"will not schedule". That is not true of the cluster we have: both nodes on
+`dev-eks-us-east-1` report instance type `t3.medium`, which is x86_64, and
+there is no Karpenter NodePool. Builds are `linux/amd64` only. When an arm64
+pool exists, `platforms:` in `.github/workflows/build-push.yml` is the one line
+that changes.
+
 ## Requirements that are enforced, not suggested
 
 | Requirement | Enforced by |
 |---|---|
-| Multi-arch image | Nodes are Graviton; amd64-only will not schedule |
+| Image built for the node architecture | `dev-eks-us-east-1` runs a `t3.medium` node group, which is **x86_64** - so `linux/amd64` is what schedules today |
 | Immutable tag, never `:latest` | Rollback needs a tag to roll back to |
 | Images from ECR only | Kyverno registry allowlist |
 | Resource requests and limits | Kyverno, at admission |
