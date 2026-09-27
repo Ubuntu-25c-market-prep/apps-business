@@ -1,0 +1,135 @@
+###############################################################################
+# Reusable build-and-push, one app per call.
+#
+# Every app in this repository calls this workflow rather than copying it, so
+# the registry path, the tagging rule and the OIDC posture are defined once.
+# A caller is a five-line file: see resume-builder.yml.
+#
+# WHAT IT PUSHES, AND WHEN
+#
+# On a pull request: builds, pushes NOTHING, and needs no credentials. A pull
+# request - including one from a fork - can therefore never touch ECR.
+#
+# On a push to main: builds and pushes exactly one tag,
+#
+#   ${{ vars.ECR_REGISTRY }}/dev-ecr-us-east-1/<app>:<commit sha>
+#
+# and nothing else. NO `:latest`, and no moving tag of any kind. The ECR
+# repositories are created with image_tag_mutability: IMMUTABLE, so a second
+# push to an existing tag is rejected by the registry - a moving tag here
+# would not be sloppy, it would be a hard build failure. It is also what makes
+# a rollback possible: the tag a deployment names keeps meaning the same bytes
+# forever.
+#
+# The image reference is echoed in the last step and written to the job
+# summary, because the next action after a successful build is pasting it into
+# a gitops-argocd overlay by hand.
+###############################################################################
+
+name: build-push
+
+on:
+  workflow_call:
+    inputs:
+      app:
+        description: "Directory name of the app to build - also its ECR repository name."
+        required: true
+        type: string
+
+# id-token is what lets the job exchange a GitHub-signed token for AWS
+# credentials. There is no access key anywhere in this repository, and no
+# long-lived credential to leak or rotate.
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-1
+  # The registry namespace, from terraform-infra-v2's ecr stack:
+  # <env>-ecr-<region>, with one repository per app inside it.
+  ECR_NAMESPACE: dev-ecr-us-east-1
+
+jobs:
+  build:
+    name: build ${{ inputs.app }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Decided once, here, so no later step has to repeat the condition.
+      - name: Decide whether this run pushes
+        id: mode
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "push=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "push=false" >> "$GITHUB_OUTPUT"
+            echo "Pull request or non-main push: build only, no registry credentials." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # ---------------------------------------------------------------------
+      # Credentials, only on the push path.
+      # ---------------------------------------------------------------------
+      - name: Configure AWS credentials (OIDC)
+        if: steps.mode.outputs.push == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_PUSH_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to ECR
+        if: steps.mode.outputs.push == 'true'
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Compose the image reference
+        id: image
+        run: |
+          ref="${{ vars.ECR_REGISTRY }}/${ECR_NAMESPACE}/${{ inputs.app }}:${{ github.sha }}"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+
+      # ---------------------------------------------------------------------
+      # linux/amd64 only.
+      #
+      # The cluster's managed node group is t3.medium (x86_64) - verified on
+      # dev-eks-us-east-1. There is no arm64 node pool, so a second
+      # architecture would double the build time to produce something nothing
+      # can schedule. Add linux/arm64 to this list in the same change that
+      # adds an arm64 node pool, not before.
+      #
+      # No setup-qemu-action for the same reason: nothing here cross-builds.
+      # ---------------------------------------------------------------------
+      - name: Build${{ steps.mode.outputs.push == 'true' && ' and push' || '' }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ inputs.app }}
+          platforms: linux/amd64
+          push: ${{ steps.mode.outputs.push == 'true' }}
+          tags: ${{ steps.image.outputs.ref }}
+          build-args: |
+            VERSION=${{ github.sha }}
+          provenance: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image reference
+        run: |
+          if [ "${{ steps.mode.outputs.push }}" = "true" ]; then
+            echo "Pushed:"
+            echo "${{ steps.image.outputs.ref }}"
+            {
+              echo "### Pushed image"
+              echo
+              echo '```'
+              echo "${{ steps.image.outputs.ref }}"
+              echo '```'
+              echo
+              echo "Paste this into \`${{ inputs.app }}/overlays/dev/kustomization.yaml\` in gitops-argocd."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Built (not pushed). Would have been:"
+            echo "${{ steps.image.outputs.ref }}"
+          fi

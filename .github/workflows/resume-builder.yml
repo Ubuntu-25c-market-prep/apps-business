@@ -1,0 +1,38 @@
+###############################################################################
+# resume-builder: build on every change, push on main.
+#
+# All of the logic is in build-push.yml. This file exists to say which app and
+# which paths - adding an app is a copy of these fifteen lines with two words
+# changed.
+###############################################################################
+
+name: resume-builder
+
+on:
+  pull_request:
+    paths:
+      - "resume-builder/**"
+      - ".github/workflows/resume-builder.yml"
+      - ".github/workflows/build-push.yml"
+  push:
+    branches: [main]
+    paths:
+      - "resume-builder/**"
+      - ".github/workflows/resume-builder.yml"
+      - ".github/workflows/build-push.yml"
+
+concurrency:
+  group: resume-builder-${{ github.ref }}
+  cancel-in-progress: true
+
+# Inherited by the called workflow. Stated here too, because a reader of this
+# file should not have to open another one to learn that a push can reach AWS.
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  build-push:
+    uses: ./.github/workflows/build-push.yml
+    with:
+      app: resume-builder
